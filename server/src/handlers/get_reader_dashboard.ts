@@ -1,4 +1,7 @@
 
+import { db } from '../db';
+import { usersTable, readerProfilesTable, readingSessionsTable, transactionsTable } from '../db/schema';
+import { eq, and, gte, desc } from 'drizzle-orm';
 import { type User, type ReaderProfile, type ReadingSession, type Transaction } from '../schema';
 
 export interface ReaderDashboardData {
@@ -15,47 +18,123 @@ export interface ReaderDashboardData {
 }
 
 export const getReaderDashboard = async (userId: string): Promise<ReaderDashboardData> => {
-  // This is a placeholder declaration! Real code should be implemented here.
-  // The goal of this handler is fetching comprehensive dashboard data for a reader.
-  // Should include profile info, recent sessions, earnings breakdown, transaction history.
-  // Should calculate time-based earnings (daily, weekly, monthly).
-  // Should include session analytics like average duration, rating trends.
-  return Promise.resolve({
-    user: {
-      id: userId,
-      email: 'placeholder@example.com',
-      name: 'Placeholder Reader',
-      role: 'reader',
-      avatar_url: null,
-      created_at: new Date(),
-      updated_at: new Date()
-    },
-    profile: {
-      id: '00000000-0000-0000-0000-000000000000',
-      user_id: userId,
-      display_name: 'Placeholder Reader',
-      bio: null,
-      specialties: [],
-      years_experience: 0,
-      rating: 0,
-      total_reviews: 0,
-      is_online: false,
-      is_available: false,
-      chat_rate_per_minute: 5.00,
-      phone_rate_per_minute: 8.00,
-      video_rate_per_minute: 10.00,
-      total_earnings: 0,
-      pending_payout: 0,
-      created_at: new Date(),
-      updated_at: new Date()
-    },
-    recentSessions: [],
-    earnings: {
-      today: 0,
-      thisWeek: 0,
-      thisMonth: 0,
-      pending: 0
-    },
-    recentTransactions: []
-  } as ReaderDashboardData);
+  try {
+    // Fetch user data
+    const users = await db.select()
+      .from(usersTable)
+      .where(eq(usersTable.id, userId))
+      .execute();
+
+    if (users.length === 0) {
+      throw new Error('User not found');
+    }
+
+    const user = users[0];
+
+    // Fetch reader profile
+    const profiles = await db.select()
+      .from(readerProfilesTable)
+      .where(eq(readerProfilesTable.user_id, userId))
+      .execute();
+
+    if (profiles.length === 0) {
+      throw new Error('Reader profile not found');
+    }
+
+    const profile = profiles[0];
+
+    // Fetch recent sessions (last 10)
+    const sessionsResults = await db.select()
+      .from(readingSessionsTable)
+      .where(eq(readingSessionsTable.reader_id, userId))
+      .orderBy(desc(readingSessionsTable.created_at))
+      .limit(10)
+      .execute();
+
+    // Fetch recent transactions (last 10)
+    const transactionResults = await db.select()
+      .from(transactionsTable)
+      .where(eq(transactionsTable.user_id, userId))
+      .orderBy(desc(transactionsTable.created_at))
+      .limit(10)
+      .execute();
+
+    // Calculate date boundaries for earnings
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const weekStart = new Date(today);
+    weekStart.setDate(today.getDate() - 7);
+    const monthStart = new Date(today);
+    monthStart.setDate(today.getDate() - 30);
+
+    // Fetch completed sessions for earnings calculation
+    const completedSessions = await db.select()
+      .from(readingSessionsTable)
+      .where(and(
+        eq(readingSessionsTable.reader_id, userId),
+        eq(readingSessionsTable.status, 'completed')
+      ))
+      .execute();
+
+    // Calculate earnings
+    let todayEarnings = 0;
+    let weekEarnings = 0;
+    let monthEarnings = 0;
+
+    completedSessions.forEach(session => {
+      const totalCost = session.total_cost ? parseFloat(session.total_cost) : 0;
+      const sessionDate = session.ended_at || session.started_at;
+
+      if (sessionDate >= today) {
+        todayEarnings += totalCost;
+      }
+      if (sessionDate >= weekStart) {
+        weekEarnings += totalCost;
+      }
+      if (sessionDate >= monthStart) {
+        monthEarnings += totalCost;
+      }
+    });
+
+    // Convert numeric fields for profile
+    const convertedProfile: ReaderProfile = {
+      ...profile,
+      rating: parseFloat(profile.rating),
+      chat_rate_per_minute: parseFloat(profile.chat_rate_per_minute),
+      phone_rate_per_minute: parseFloat(profile.phone_rate_per_minute),
+      video_rate_per_minute: parseFloat(profile.video_rate_per_minute),
+      total_earnings: parseFloat(profile.total_earnings),
+      pending_payout: parseFloat(profile.pending_payout)
+    };
+
+    // Convert sessions data
+    const recentSessions: ReadingSession[] = sessionsResults.map(session => ({
+      ...session,
+      rate_per_minute: parseFloat(session.rate_per_minute),
+      duration_minutes: session.duration_minutes ? parseFloat(session.duration_minutes) : null,
+      total_cost: session.total_cost ? parseFloat(session.total_cost) : null
+    }));
+
+    // Convert transactions data
+    const recentTransactions: Transaction[] = transactionResults.map(transaction => ({
+      ...transaction,
+      amount: parseFloat(transaction.amount)
+    }));
+
+    return {
+      user,
+      profile: convertedProfile,
+      recentSessions,
+      earnings: {
+        today: todayEarnings,
+        thisWeek: weekEarnings,
+        thisMonth: monthEarnings,
+        pending: convertedProfile.pending_payout
+      },
+      recentTransactions
+    };
+  } catch (error) {
+    console.error('Reader dashboard fetch failed:', error);
+    throw error;
+  }
 };

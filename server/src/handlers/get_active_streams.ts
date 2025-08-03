@@ -1,11 +1,25 @@
 
+import { db } from '../db';
+import { liveStreamsTable } from '../db/schema';
 import { type LiveStream } from '../schema';
+import { eq, desc } from 'drizzle-orm';
 
 export const getActiveStreams = async (): Promise<LiveStream[]> => {
-  // This is a placeholder declaration! Real code should be implemented here.
-  // The goal of this handler is fetching all currently live streams.
-  // Should query live_streams where status = 'live'.
-  // Should include reader information and sort by viewer count or start time.
-  // Should be used for the home page featured streams section.
-  return Promise.resolve([]);
+  try {
+    const results = await db.select()
+      .from(liveStreamsTable)
+      .where(eq(liveStreamsTable.status, 'live'))
+      .orderBy(desc(liveStreamsTable.viewer_count), desc(liveStreamsTable.started_at))
+      .execute();
+
+    // Convert numeric fields back to numbers
+    return results.map(stream => ({
+      ...stream,
+      // viewer_count is integer, no conversion needed
+      // All other fields are already correct types
+    }));
+  } catch (error) {
+    console.error('Failed to fetch active streams:', error);
+    throw error;
+  }
 };

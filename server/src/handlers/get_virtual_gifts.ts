@@ -1,10 +1,21 @@
 
+import { db } from '../db';
+import { virtualGiftsTable } from '../db/schema';
 import { type VirtualGift } from '../schema';
 
 export const getVirtualGifts = async (): Promise<VirtualGift[]> => {
-  // This is a placeholder declaration! Real code should be implemented here.
-  // The goal of this handler is fetching all available virtual gifts.
-  // Should return all gifts with their names, images, prices, and animations.
-  // Should be used in gift selection UI during live streams and messaging.
-  return Promise.resolve([]);
+  try {
+    const results = await db.select()
+      .from(virtualGiftsTable)
+      .execute();
+
+    // Convert numeric fields back to numbers before returning
+    return results.map(gift => ({
+      ...gift,
+      price: parseFloat(gift.price) // Convert string back to number
+    }));
+  } catch (error) {
+    console.error('Failed to fetch virtual gifts:', error);
+    throw error;
+  }
 };
